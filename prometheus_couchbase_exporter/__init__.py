@@ -1,10 +1,16 @@
+from operator import getitem
+
+import argparse
+import os
+import re
+import requests
+import sys
+import time
 from prometheus_client import start_http_server
-from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily, REGISTRY
+from prometheus_client.core import GaugeMetricFamily, REGISTRY
+from requests.auth import HTTPBasicAuth
 from statsmetrics import couchbase as couchbase_metrics
 
-from operator import getitem
-from requests.auth import HTTPBasicAuth
-import json, requests, sys, time, os, ast, signal, re, argparse
 
 class CouchbaseCollector(object):
     METRIC_PREFIX = 'couchbase_'
@@ -17,6 +23,7 @@ class CouchbaseCollector(object):
     """
     Split dots in metric name and search for it in obj dict
     """
+
     def _dot_get(self, metric, obj):
         try:
             return reduce(getitem, metric.split('.'), obj)
@@ -28,10 +35,12 @@ class CouchbaseCollector(object):
     Auth username and password can be defined as environment variables
     :rtype JSON
     """
+
     def _request_data(self, url):
         try:
-            if set(["COUCHBASE_USERNAME","COUCHBASE_PASSWORD"]).issubset(os.environ):
-                response = requests.get(url, auth=HTTPBasicAuth(os.environ["COUCHBASE_USERNAME"], os.environ["COUCHBASE_PASSWORD"]))
+            if set(["COUCHBASE_USERNAME", "COUCHBASE_PASSWORD"]).issubset(os.environ):
+                response = requests.get(url, auth=HTTPBasicAuth(os.environ["COUCHBASE_USERNAME"],
+                                                                os.environ["COUCHBASE_PASSWORD"]))
             else:
                 response = requests.get(url)
         except Exception as e:
@@ -47,6 +56,7 @@ class CouchbaseCollector(object):
     """
     Add metrics in GaugeMetricFamily format
     """
+
     def _add_metrics(self, metrics, metric_name, metric_gauges, data):
         metric_id = re.sub('(\.)', '_', metrics['id']).lower()
         metric_value = self._dot_get(metrics['id'], data)
@@ -56,34 +66,46 @@ class CouchbaseCollector(object):
         if metric_value is not False:
             if isinstance(metric_value, list):
                 metric_value = sum(metric_value) / float(len(metric_value))
-            self.gauges[metric_id] = GaugeMetricFamily('%s_%s' % (metric_name, metric_id), '%s' % metric_id, value=None, labels=metrics['labels'])
+
+            if metric_id not in self.gauges:
+                self.gauges[metric_id] = GaugeMetricFamily('%s_%s' % (metric_name, metric_id), '%s' % metric_id,
+                                                           value=None,
+                                                           labels=metrics['labels'])
             self.gauges[metric_id].add_metric(gauges, value=metric_value)
 
     """
     Collect cluster, nodes, bucket and bucket details metrics
     """
+
     def _collect_metrics(self, key, values, couchbase_data):
-            if key == 'cluster':
+        if key == 'cluster':
+            for metrics in values['metrics']:
+                self._add_metrics(metrics, self.METRIC_PREFIX + 'cluster', [], couchbase_data)
+        elif key == 'nodes':
+            for node in couchbase_data['nodes']:
                 for metrics in values['metrics']:
-                    self._add_metrics(metrics, self.METRIC_PREFIX + 'cluster', [], couchbase_data)
-            elif key == 'nodes':
-                for node in couchbase_data['nodes']:
-                    for metrics in values['metrics']:
-                        self._add_metrics(metrics, self.METRIC_PREFIX + 'node', [node['hostname']], node)
-            elif key == 'buckets':
-                for bucket in couchbase_data:
-                    for metrics in values['metrics']:
-                        self._add_metrics(metrics, self.METRIC_PREFIX + 'bucket', [bucket['name']], bucket)
-                    # Get detailed stats for each bucket
-                    bucket_stats = self._request_data(self.BASE_URL + bucket['stats']['uri'])
-                    for bucket_metrics in values['bucket_stats']:
-                        self._add_metrics(bucket_metrics, self.METRIC_PREFIX + 'bucket_stats', [bucket['name']], bucket_stats["op"]["samples"])
+                    self._add_metrics(metrics, self.METRIC_PREFIX + 'node', [node['hostname']], node)
+        elif key == 'buckets':
+            for bucket in couchbase_data:
+                for metrics in values['metrics']:
+                    self._add_metrics(metrics, self.METRIC_PREFIX + 'bucket', [bucket['name']], bucket)
+                # Get detailed stats for each bucket
+                bucket_stats = self._request_data(self.BASE_URL + bucket['stats']['uri'])
+                for bucket_metrics in values['bucket_stats']:
+                    self._add_metrics(bucket_metrics, self.METRIC_PREFIX + 'bucket_stats',
+                                      [bucket['name']],
+                                      bucket_stats["op"]["samples"])
+
+    def _clear_gauges(self):
+        self.gauges = {}
 
     """
     Collect each metric defined in external module statsmetrics
     """
+
     def collect(self):
-        for api_key,api_values in self.metrics.items():
+        self._clear_gauges()
+        for api_key, api_values in self.metrics.items():
             # Request data for each url
             couchbase_data = self._request_data(self.BASE_URL + api_values['url'])
             self._collect_metrics(api_key, api_values, couchbase_data)
@@ -91,11 +113,14 @@ class CouchbaseCollector(object):
         for gauge_name, gauge in self.gauges.items():
             yield gauge
 
+
 """
 Parse optional arguments
 :couchase_host:port
 :port
 """
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='couchbase exporter args couchbase address and port'
@@ -117,15 +142,15 @@ def parse_args():
     )
     return parser.parse_args()
 
-#if __name__ == '__main__':
+
 def main():
-	try:
-		args = parse_args()
-		port = int(args.port)
-		REGISTRY.register(CouchbaseCollector(args.couchbase))
-		start_http_server(port)
-		print "Serving at port: ", port
-		while True: time.sleep(1)
-	except KeyboardInterrupt:
-		print(" Interrupted")
-		exit(0)
+    try:
+        args = parse_args()
+        port = int(args.port)
+        REGISTRY.register(CouchbaseCollector(args.couchbase))
+        start_http_server(port)
+        print "Serving at port: ", port
+        while True: time.sleep(1)
+    except KeyboardInterrupt:
+        print(" Interrupted")
+        exit(0)
