@@ -1,11 +1,11 @@
-from operator import getitem
-
 import argparse
 import os
 import re
-import requests
 import sys
 import time
+from operator import getitem
+
+import requests
 from prometheus_client import start_http_server
 from prometheus_client.core import GaugeMetricFamily, REGISTRY
 from requests.auth import HTTPBasicAuth
@@ -50,6 +50,7 @@ class CouchbaseCollector(object):
         if response.status_code != requests.codes.ok:
             print('Response Status ({0}): {1}'.format(response.status_code, response.text))
 
+        response.raise_for_status()
         result = response.json()
         return result
 
