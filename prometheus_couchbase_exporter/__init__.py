@@ -150,7 +150,7 @@ def main():
         port = int(args.port)
         REGISTRY.register(CouchbaseCollector(args.couchbase))
         start_http_server(port)
-        print "Serving at port: ", port
+        print("Serving at port: ", port)
         while True: time.sleep(1)
     except KeyboardInterrupt:
         print(" Interrupted")
